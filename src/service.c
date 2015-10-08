@@ -2454,6 +2454,24 @@ int __connman_service_get_index(struct connman_service *service)
 	return -1;
 }
 
+bool __connman_service_set_autoconnect(struct connman_service *service,
+						bool autoconnect)
+{
+	if (!service || service->autoconnect == autoconnect)
+		return false;
+
+	service->autoconnect = autoconnect;
+
+	autoconnect_changed(service);
+
+	if (autoconnect)
+		__connman_service_auto_connect(CONNMAN_SERVICE_CONNECT_REASON_AUTO);
+
+	service_save(service);
+
+	return true;
+}
+
 void __connman_service_set_hidden(struct connman_service *service)
 {
 	if (!service || service->hidden)
@@ -3229,17 +3247,8 @@ static DBusMessage *set_property(DBusConnection *conn,
 
 		dbus_message_iter_get_basic(&value, &autoconnect);
 
-		if (service->autoconnect == autoconnect)
+		if (!__connman_service_set_autoconnect(service, autoconnect))
 			return g_dbus_create_reply(msg, DBUS_TYPE_INVALID);
-
-		service->autoconnect = autoconnect;
-
-		autoconnect_changed(service);
-
-		if (autoconnect)
-			__connman_service_auto_connect(CONNMAN_SERVICE_CONNECT_REASON_AUTO);
-
-		service_save(service);
 	} else if (g_str_equal(name, "Nameservers.Configuration")) {
 		DBusMessageIter entry;
 		GString *str;
