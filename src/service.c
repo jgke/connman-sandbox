@@ -2563,6 +2563,32 @@ bool __connman_service_set_timeservers_conf(struct connman_service *service,
 	return true;
 }
 
+bool __connman_service_set_domains_conf(struct connman_service *service,
+							char **domains)
+{
+	if (service->immutable) {
+		g_strfreev(domains);
+		return false;
+	}
+
+	searchdomain_remove_all(service);
+	g_strfreev(service->domains);
+	service->domains = NULL;
+
+	if (domains) {
+		domains = remove_empty_strings(domains);
+		service->domains = domains;
+	}
+
+	searchdomain_add_all(service);
+	domain_configuration_changed(service);
+	domain_changed(service);
+
+	service_save(service);
+
+	return true;
+}
+
 void __connman_service_set_hidden(struct connman_service *service)
 {
 	if (!service || service->hidden)
@@ -3405,6 +3431,7 @@ static DBusMessage *set_property(DBusConnection *conn,
 	} else if (g_str_equal(name, "Domains.Configuration")) {
 		DBusMessageIter entry;
 		GString *str;
+		char **domains = NULL;
 
 		if (service->immutable)
 			return __connman_error_not_supported(msg);
@@ -3432,23 +3459,14 @@ static DBusMessage *set_property(DBusConnection *conn,
 				g_string_append(str, val);
 		}
 
-		searchdomain_remove_all(service);
-		g_strfreev(service->domains);
-
-		if (str->len > 0) {
-			char **domains = g_strsplit_set(str->str, " ", 0);
-			domains = remove_empty_strings(domains);
-			service->domains = domains;
-		} else
-			service->domains = NULL;
+		if (str->len > 0)
+			domains = g_strsplit_set(str->str, " ", 0);
 
 		g_string_free(str, TRUE);
 
-		searchdomain_add_all(service);
-		domain_configuration_changed(service);
-		domain_changed(service);
+		if (!__connman_service_set_domains_conf(service, domains))
+			return __connman_error_invalid_arguments(msg);
 
-		service_save(service);
 	} else if (g_str_equal(name, "Proxy.Configuration")) {
 		int err;
 
