@@ -2472,6 +2472,72 @@ bool __connman_service_set_autoconnect(struct connman_service *service,
 	return true;
 }
 
+static char **remove_empty_strings(char **strv)
+{
+	int index = 0;
+	char **iter = strv;
+
+	while (*iter) {
+		if (**iter)
+			strv[index++] = *iter;
+		else
+			g_free(*iter);
+		iter++;
+	}
+
+	strv[index] = NULL;
+	return strv;
+}
+
+bool __connman_service_set_nameservers_conf(struct connman_service *service,
+							char **nameservers)
+{
+	int index;
+	const char *gw;
+	char **iter;
+
+	if (!service->nameservers_config && !nameservers)
+		return false;
+
+	index = __connman_service_get_index(service);
+	gw = __connman_ipconfig_get_gateway_from_index(index,
+			CONNMAN_IPCONFIG_TYPE_ALL);
+
+	if (gw && strlen(gw))
+		__connman_service_nameserver_del_routes(service,
+				CONNMAN_IPCONFIG_TYPE_ALL);
+
+	nameserver_remove_all(service, CONNMAN_IPCONFIG_TYPE_ALL);
+	g_strfreev(service->nameservers_config);
+	service->nameservers_config = NULL;
+
+	if (nameservers) {
+		for (iter = nameservers; *iter; iter++)
+			if (connman_inet_check_ipaddress(*iter) <= 0)
+				*iter[0] = '\0';
+
+		nameservers = remove_empty_strings(nameservers);
+		service->nameservers_config = nameservers;
+	}
+
+	nameserver_add_all(service, CONNMAN_IPCONFIG_TYPE_ALL);
+	dns_configuration_changed(service);
+
+	if (__connman_service_is_connected_state(service,
+				CONNMAN_IPCONFIG_TYPE_IPV4))
+		__connman_wispr_start(service,
+				CONNMAN_IPCONFIG_TYPE_IPV4);
+
+	if (__connman_service_is_connected_state(service,
+				CONNMAN_IPCONFIG_TYPE_IPV6))
+		__connman_wispr_start(service,
+				CONNMAN_IPCONFIG_TYPE_IPV6);
+
+	service_save(service);
+
+	return true;
+}
+
 void __connman_service_set_hidden(struct connman_service *service)
 {
 	if (!service || service->hidden)
@@ -2941,23 +3007,6 @@ static DBusMessage *get_properties(DBusConnection *conn,
 	return reply;
 }
 
-static char **remove_empty_strings(char **strv)
-{
-	int index = 0;
-	char **iter = strv;
-
-	while (*iter) {
-		if (**iter)
-			strv[index++] = *iter;
-		else
-			g_free(*iter);
-		iter++;
-	}
-
-	strv[index] = NULL;
-	return strv;
-}
-
 static int update_proxy_configuration(struct connman_service *service,
 				DBusMessageIter *array)
 {
@@ -3252,8 +3301,7 @@ static DBusMessage *set_property(DBusConnection *conn,
 	} else if (g_str_equal(name, "Nameservers.Configuration")) {
 		DBusMessageIter entry;
 		GString *str;
-		int index;
-		const char *gw;
+		char **nameservers = NULL;
 
 		if (__connman_provider_is_immutable(service->provider) ||
 				service->immutable)
@@ -3265,14 +3313,6 @@ static DBusMessage *set_property(DBusConnection *conn,
 		str = g_string_new(NULL);
 		if (!str)
 			return __connman_error_invalid_arguments(msg);
-
-		index = __connman_service_get_index(service);
-		gw = __connman_ipconfig_get_gateway_from_index(index,
-			CONNMAN_IPCONFIG_TYPE_ALL);
-
-		if (gw && strlen(gw))
-			__connman_service_nameserver_del_routes(service,
-						CONNMAN_IPCONFIG_TYPE_ALL);
 
 		dbus_message_iter_recurse(&value, &entry);
 
@@ -3290,43 +3330,14 @@ static DBusMessage *set_property(DBusConnection *conn,
 				g_string_append(str, val);
 		}
 
-		nameserver_remove_all(service, CONNMAN_IPCONFIG_TYPE_ALL);
-		g_strfreev(service->nameservers_config);
-
-		if (str->len > 0) {
-			char **nameservers, **iter;
-
+		if (str->len > 0)
 			nameservers = g_strsplit_set(str->str, " ", 0);
-
-			for (iter = nameservers; *iter; iter++)
-				if (connman_inet_check_ipaddress(*iter) <= 0)
-					*iter[0] = '\0';
-
-			nameservers = remove_empty_strings(nameservers);
-			service->nameservers_config = nameservers;
-		} else {
-			service->nameservers_config = NULL;
-		}
 
 		g_string_free(str, TRUE);
 
-		if (gw && strlen(gw))
-			__connman_service_nameserver_add_routes(service, gw);
-
-		nameserver_add_all(service, CONNMAN_IPCONFIG_TYPE_ALL);
-		dns_configuration_changed(service);
-
-		if (__connman_service_is_connected_state(service,
-						CONNMAN_IPCONFIG_TYPE_IPV4))
-			__connman_wispr_start(service,
-						CONNMAN_IPCONFIG_TYPE_IPV4);
-
-		if (__connman_service_is_connected_state(service,
-						CONNMAN_IPCONFIG_TYPE_IPV6))
-			__connman_wispr_start(service,
-						CONNMAN_IPCONFIG_TYPE_IPV6);
-
-		service_save(service);
+		if (!__connman_service_set_nameservers_conf(service,
+								nameservers))
+			return __connman_error_invalid_arguments(msg);
 	} else if (g_str_equal(name, "Timeservers.Configuration")) {
 		DBusMessageIter entry;
 		GString *str;
