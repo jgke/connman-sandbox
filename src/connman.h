@@ -763,6 +763,8 @@ bool __connman_service_set_autoconnect(struct connman_service *service,
 						bool autoconnect);
 bool __connman_service_set_nameservers_conf(struct connman_service *service,
 							char **nameservers);
+bool __connman_service_set_timeservers_conf(struct connman_service *service,
+							char **nameservers);
 void __connman_service_set_hidden(struct connman_service *service);
 void __connman_service_set_hostname(struct connman_service *service,
 						const char *hostname);

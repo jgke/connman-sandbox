@@ -2538,6 +2538,31 @@ bool __connman_service_set_nameservers_conf(struct connman_service *service,
 	return true;
 }
 
+bool __connman_service_set_timeservers_conf(struct connman_service *service,
+							char **timeservers)
+{
+	if (service->immutable) {
+		g_strfreev(timeservers);
+		return false;
+	}
+
+	g_strfreev(service->timeservers_config);
+	service->timeservers_config = NULL;
+
+	if (timeservers) {
+		timeservers = remove_empty_strings(timeservers);
+		service->timeservers_config = timeservers;
+	}
+
+	service_save(service);
+	timeservers_configuration_changed(service);
+
+	if (service == __connman_service_get_default())
+		__connman_timeserver_sync(service);
+
+	return true;
+}
+
 void __connman_service_set_hidden(struct connman_service *service)
 {
 	if (!service || service->hidden)
@@ -3341,6 +3366,7 @@ static DBusMessage *set_property(DBusConnection *conn,
 	} else if (g_str_equal(name, "Timeservers.Configuration")) {
 		DBusMessageIter entry;
 		GString *str;
+		char **timeservers = NULL;
 
 		if (service->immutable)
 			return __connman_error_not_supported(msg);
@@ -3368,24 +3394,14 @@ static DBusMessage *set_property(DBusConnection *conn,
 				g_string_append(str, val);
 		}
 
-		g_strfreev(service->timeservers_config);
-		service->timeservers_config = NULL;
-
-		if (str->len > 0) {
-			char **timeservers = g_strsplit_set(str->str, " ", 0);
-			timeservers = remove_empty_strings(timeservers);
-			service->timeservers_config = timeservers;
-		} else
-			service->timeservers = NULL;
+		if (str->len > 0)
+			timeservers = g_strsplit_set(str->str, " ", 0);
 
 		g_string_free(str, TRUE);
 
-		service_save(service);
-		timeservers_configuration_changed(service);
-
-		if (service == __connman_service_get_default())
-			__connman_timeserver_sync(service);
-
+		if (!__connman_service_set_timeservers_conf(service,
+								timeservers))
+			return __connman_error_invalid_arguments(msg);
 	} else if (g_str_equal(name, "Domains.Configuration")) {
 		DBusMessageIter entry;
 		GString *str;
