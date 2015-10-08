@@ -767,6 +767,9 @@ bool __connman_service_set_timeservers_conf(struct connman_service *service,
 							char **nameservers);
 bool __connman_service_set_domains_conf(struct connman_service *service,
 							char **domains);
+bool __connman_service_set_proxy_conf(struct connman_service *service,
+				enum connman_service_proxy_method method,
+				char *url, char **servers, char **excludes);
 void __connman_service_set_hidden(struct connman_service *service);
 void __connman_service_set_hostname(struct connman_service *service,
 						const char *hostname);

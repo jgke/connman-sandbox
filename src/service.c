@@ -2589,6 +2589,72 @@ bool __connman_service_set_domains_conf(struct connman_service *service,
 	return true;
 }
 
+bool __connman_service_set_proxy_conf(struct connman_service *service,
+				enum connman_service_proxy_method method,
+				char *url, char **servers, char **excludes)
+{
+	switch (method) {
+	case CONNMAN_SERVICE_PROXY_METHOD_DIRECT:
+		break;
+	case CONNMAN_SERVICE_PROXY_METHOD_MANUAL:
+		if (!servers)
+			goto error;
+
+		g_strfreev(service->proxies);
+		servers = remove_empty_strings(servers);
+		service->proxies = servers;
+
+		g_strfreev(service->excludes);
+		service->excludes = NULL;
+
+		if (excludes) {
+			excludes = remove_empty_strings(excludes);
+			service->excludes = excludes;
+		}
+
+		break;
+	case CONNMAN_SERVICE_PROXY_METHOD_AUTO:
+		g_free(service->pac);
+
+		if (url && strlen(url) > 0)
+			service->pac = g_strstrip(g_strdup(url));
+		else
+			service->pac = NULL;
+
+		/* if we are connected:
+		   - if service->pac == NULL
+		   - if __connman_ipconfig_get_proxy_autoconfig(
+		   service->ipconfig) == NULL
+		   --> We should start WPAD */
+
+		break;
+	case CONNMAN_SERVICE_PROXY_METHOD_UNKNOWN:
+		goto error;
+	}
+
+	g_free(url);
+
+	if (method != CONNMAN_SERVICE_PROXY_METHOD_MANUAL) {
+		g_strfreev(servers);
+		g_strfreev(excludes);
+	}
+
+	service->proxy_config = method;
+	proxy_configuration_changed(service);
+	__connman_notifier_proxy_changed(service);
+
+	service_save(service);
+
+	return true;
+
+error:
+	g_free(url);
+	g_strfreev(servers);
+	g_strfreev(excludes);
+
+	return false;
+}
+
 void __connman_service_set_hidden(struct connman_service *service)
 {
 	if (!service || service->hidden)
@@ -3065,6 +3131,8 @@ static int update_proxy_configuration(struct connman_service *service,
 	enum connman_service_proxy_method method;
 	GString *servers_str = NULL;
 	GString *excludes_str = NULL;
+	char **servers = NULL;
+	char **excludes = NULL;
 	const char *url = NULL;
 
 	method = CONNMAN_SERVICE_PROXY_METHOD_UNKNOWN;
@@ -3079,13 +3147,13 @@ static int update_proxy_configuration(struct connman_service *service,
 		dbus_message_iter_recurse(&dict, &entry);
 
 		if (dbus_message_iter_get_arg_type(&entry) != DBUS_TYPE_STRING)
-			goto error;
+			return -EINVAL;
 
 		dbus_message_iter_get_basic(&entry, &key);
 		dbus_message_iter_next(&entry);
 
 		if (dbus_message_iter_get_arg_type(&entry) != DBUS_TYPE_VARIANT)
-			goto error;
+			return -EINVAL;
 
 		dbus_message_iter_recurse(&entry, &variant);
 
@@ -3095,24 +3163,24 @@ static int update_proxy_configuration(struct connman_service *service,
 			const char *val;
 
 			if (type != DBUS_TYPE_STRING)
-				goto error;
+				return -EINVAL;
 
 			dbus_message_iter_get_basic(&variant, &val);
 			method = string2proxymethod(val);
 		} else if (g_str_equal(key, "URL")) {
 			if (type != DBUS_TYPE_STRING)
-				goto error;
+				return -EINVAL;
 
 			dbus_message_iter_get_basic(&variant, &url);
 		} else if (g_str_equal(key, "Servers")) {
 			DBusMessageIter str_array;
 
 			if (type != DBUS_TYPE_ARRAY)
-				goto error;
+				return -EINVAL;
 
 			servers_str = g_string_new(NULL);
 			if (!servers_str)
-				goto error;
+				return -ENOMEM;
 
 			dbus_message_iter_recurse(&variant, &str_array);
 
@@ -3130,15 +3198,18 @@ static int update_proxy_configuration(struct connman_service *service,
 
 				dbus_message_iter_next(&str_array);
 			}
+			if (servers_str->len > 0)
+				servers = g_strsplit(servers_str->str, " ", 0);
+			g_string_free(servers_str, TRUE);
 		} else if (g_str_equal(key, "Excludes")) {
 			DBusMessageIter str_array;
 
 			if (type != DBUS_TYPE_ARRAY)
-				goto error;
+				return -EINVAL;
 
 			excludes_str = g_string_new(NULL);
 			if (!excludes_str)
-				goto error;
+				return -ENOMEM;
 
 			dbus_message_iter_recurse(&variant, &str_array);
 
@@ -3156,83 +3227,19 @@ static int update_proxy_configuration(struct connman_service *service,
 
 				dbus_message_iter_next(&str_array);
 			}
+			if (excludes_str && excludes_str->len > 1)
+				excludes = g_strsplit(excludes_str->str, " ", 0);
+			g_string_free(excludes_str, TRUE);
 		}
 
 		dbus_message_iter_next(&dict);
 	}
 
-	switch (method) {
-	case CONNMAN_SERVICE_PROXY_METHOD_DIRECT:
-		break;
-	case CONNMAN_SERVICE_PROXY_METHOD_MANUAL:
-		if (!servers_str && !service->proxies)
-			goto error;
-
-		if (servers_str) {
-			g_strfreev(service->proxies);
-
-			if (servers_str->len > 0) {
-				char **proxies = g_strsplit_set(
-					servers_str->str, " ", 0);
-				proxies = remove_empty_strings(proxies);
-				service->proxies = proxies;
-			} else
-				service->proxies = NULL;
-		}
-
-		if (excludes_str) {
-			g_strfreev(service->excludes);
-
-			if (excludes_str->len > 0) {
-				char **excludes = g_strsplit_set(
-					excludes_str->str, " ", 0);
-				excludes = remove_empty_strings(excludes);
-				service->excludes = excludes;
-			} else
-				service->excludes = NULL;
-		}
-
-		if (!service->proxies)
-			method = CONNMAN_SERVICE_PROXY_METHOD_DIRECT;
-
-		break;
-	case CONNMAN_SERVICE_PROXY_METHOD_AUTO:
-		g_free(service->pac);
-
-		if (url && strlen(url) > 0)
-			service->pac = g_strstrip(g_strdup(url));
-		else
-			service->pac = NULL;
-
-		/* if we are connected:
-		   - if service->pac == NULL
-		   - if __connman_ipconfig_get_proxy_autoconfig(
-		   service->ipconfig) == NULL
-		   --> We should start WPAD */
-
-		break;
-	case CONNMAN_SERVICE_PROXY_METHOD_UNKNOWN:
-		goto error;
-	}
-
-	if (servers_str)
-		g_string_free(servers_str, TRUE);
-
-	if (excludes_str)
-		g_string_free(excludes_str, TRUE);
-
-	service->proxy_config = method;
+	if (!__connman_service_set_proxy_conf(service, method, g_strdup(url),
+						servers, excludes))
+		return -EINVAL;
 
 	return 0;
-
-error:
-	if (servers_str)
-		g_string_free(servers_str, TRUE);
-
-	if (excludes_str)
-		g_string_free(excludes_str, TRUE);
-
-	return -EINVAL;
 }
 
 int __connman_service_reset_ipconfig(struct connman_service *service,
@@ -3480,12 +3487,6 @@ static DBusMessage *set_property(DBusConnection *conn,
 
 		if (err < 0)
 			return __connman_error_failed(msg, -err);
-
-		proxy_configuration_changed(service);
-
-		__connman_notifier_proxy_changed(service);
-
-		service_save(service);
 	} else if (g_str_equal(name, "IPv4.Configuration") ||
 			g_str_equal(name, "IPv6.Configuration")) {
 
