@@ -3582,11 +3582,32 @@ static DBusMessage *clear_property(DBusConnection *conn,
 	dbus_message_get_args(msg, NULL, DBUS_TYPE_STRING, &name,
 							DBUS_TYPE_INVALID);
 
-	if (g_str_equal(name, "Error")) {
-		set_error(service, CONNMAN_SERVICE_ERROR_UNKNOWN);
-
-		g_get_current_time(&service->modified);
-		service_save(service);
+	if (service->hidden) {
+		return __connman_error_not_supported(msg);
+	} else if (g_str_equal(name, "AutoConnect")) {
+		__connman_service_set_autoconnect(service, true);
+	} else if (service->immutable) {
+		return __connman_error_not_supported(msg);
+	} else if (g_str_equal(name, "Nameservers.Configuration")) {
+		__connman_service_set_nameservers_conf(service, NULL);
+	} else if (g_str_equal(name, "Timeservers.Configuration")) {
+		__connman_service_set_timeservers_conf(service, NULL);
+	} else if (g_str_equal(name, "Domains.Configuration")) {
+		__connman_service_set_domains_conf(service, NULL);
+	} else if (g_str_equal(name, "Proxy.Configuration")) {
+		__connman_service_set_proxy_conf(service,
+					CONNMAN_SERVICE_PROXY_METHOD_AUTO,
+					NULL, NULL, NULL);
+	} else if (g_str_equal(name, "IPv4.Configuration")) {
+		__connman_service_reset_ipconfig(service,
+				CONNMAN_IPCONFIG_TYPE_IPV4, NULL, NULL);
+		__connman_ipconfig_set_method(service->ipconfig_ipv4,
+						CONNMAN_IPCONFIG_METHOD_DHCP);
+		__connman_network_enable_ipconfig(service->network,
+				service->ipconfig_ipv4);
+	} else if (g_str_equal(name, "IPv6.Configuration")) {
+		__connman_service_reset_ipconfig(service,
+				CONNMAN_IPCONFIG_TYPE_IPV6, NULL, NULL);
 	} else
 		return __connman_error_invalid_property(msg);
 
