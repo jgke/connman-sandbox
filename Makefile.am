@@ -385,9 +385,20 @@ EXTRA_DIST += doc/overview-api.txt doc/behavior-api.txt \
 EXTRA_DIST += src/main.conf \
 		src/eduroam.config
 
-MANUAL_PAGES += doc/connman.8 doc/connman.conf.5
+%.5 : %.5.in
+	sed -e 's|<SYSCONFDIR>|$(sysconfdir)|' \
+	    -e 's|<STORAGEDIR>|$(storagedir)|' \
+	    -e 's|<VPN_STORAGEDIR>|$(vpn_storagedir)|' $< > $@
 
-dist_man_MANS = $(MANUAL_PAGES)
+%.8 : %.8.in
+	sed -e 's|<SYSCONFDIR>|$(sysconfdir)|' \
+	    -e 's|<STORAGEDIR>|$(storagedir)|' \
+	    -e 's|<VPN_STORAGEDIR>|$(vpn_storagedir)|' $< > $@
+
+dist_man_MANS = doc/connmanctl.1
+man_MANS = doc/connman.conf.5 doc/connman-vpn.conf.5 \
+	   doc/connman-service.config.5 doc/connman-vpn-provider.config.5 \
+	   doc/connman.8 doc/connman-vpn.8
 
 pkgconfigdir = $(libdir)/pkgconfig
 
@@ -468,4 +479,4 @@ include/connman/%.h: $(abs_top_srcdir)/include/%.h
 	$(AM_V_GEN)$(LN_S) $< $@
 
 clean-local:
-	@$(RM) -rf include/connman
+	@$(RM) -rf include/connman $(man_MANS)
